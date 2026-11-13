@@ -14,8 +14,17 @@ const asset = require('../../lib/handlers/v/asset');
 function segments(req) {
   try {
     const { pathname } = new URL(req.url, 'http://internal');
-    const rest = pathname.replace(/^\/api\/v\/?/, '').replace(/\/+$/, '');
-    return rest ? rest.split('/').map(decodeURIComponent) : [];
+    const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    if (parts[0] === 'api' && parts[1] === 'v') return parts.slice(2);
+    // El rewrite /v/:slug → /api/v/page llega a la función conservando la
+    // URL original en req.url (el slug viaja en el path y en ?slug=).
+    if (parts[0] === 'v') {
+      if (parts[1] && !(req.query && req.query.slug)) {
+        req.query = { ...(req.query || {}), slug: parts[1] };
+      }
+      return ['page'];
+    }
+    return parts;
   } catch {
     return [];
   }

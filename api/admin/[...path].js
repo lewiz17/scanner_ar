@@ -19,8 +19,9 @@ const assetUrl = require('../../lib/handlers/admin/asset-url');
 function segments(req) {
   try {
     const { pathname } = new URL(req.url, 'http://internal');
-    const rest = pathname.replace(/^\/api\/admin\/?/, '').replace(/\/+$/, '');
-    return rest ? rest.split('/').map(decodeURIComponent) : [];
+    const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    if (parts[0] === 'api' && parts[1] === 'admin') return parts.slice(2);
+    return parts;
   } catch {
     return [];
   }
