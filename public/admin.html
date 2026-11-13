@@ -177,6 +177,14 @@
       <img id="imagePreview" class="preview" alt="">
       <div class="msg" id="imageMsg"></div>
 
+      <label>Tipo de contenido</label>
+      <select id="f_contentType">
+        <option value="video">Video</option>
+        <option value="layers">Multicapas (imágenes con profundidad)</option>
+        <option value="model3d">Modelo 3D (.glb)</option>
+      </select>
+
+      <div id="blockVideo">
       <label>Video (MP4/WebM/MOV, máx. 25 MB y 90 s) <span id="videoReq">*</span></label>
       <input id="f_video" type="file" accept="video/mp4,video/webm,video/quicktime">
       <video id="videoPreview" class="preview" controls muted playsinline></video>
@@ -188,6 +196,32 @@
         <option value="alpha">Sin fondo — empaquetado (la persona aparece recortada)</option>
       </select>
       <div class="muted small">En «Sin fondo» el archivo debe venir ya empaquetado: la mitad superior a color y la mitad inferior con la silueta en blanco y negro (ver VIDEO-SIN-FONDO.md en el repo).</div>
+
+      </div>
+
+      <div id="blockLayers" class="hidden">
+        <label>Capas (PNG con transparencia, de atrás hacia adelante · máx. 4)</label>
+        <div id="layerRows"></div>
+        <button type="button" class="btn secondary" id="addLayerBtn">＋ Agregar capa</button>
+        <div class="muted small">La profundidad (0–10) decide cuánto flota cada capa sobre la tarjeta al mover el celular: fondo 0, personaje 5, frente/texto 10. Todas las capas deben tener el mismo tamaño y proporción que el frente. Al editar: si no subes capas nuevas, se conservan las actuales.</div>
+        <div class="msg" id="layersMsg"></div>
+      </div>
+
+      <div id="blockModel" class="hidden">
+        <label>Modelo 3D (.glb, máx. 15 MB)</label>
+        <input id="f_model" type="file" accept=".glb,model/gltf-binary">
+        <div class="msg" id="modelMsg"></div>
+        <div class="grid2">
+          <div><label>Escala</label><input id="f_modelScale" type="number" min="0.1" max="5" step="0.1" value="1"></div>
+          <div><label>Rotación (°)</label><input id="f_modelRot" type="number" min="0" max="359" step="1" value="0"></div>
+        </div>
+        <label>Orientación</label>
+        <select id="f_modelUpright">
+          <option value="1">De pie sobre la tarjeta (sale hacia el invitado)</option>
+          <option value="0">Plano, como parte de la imagen</option>
+        </select>
+        <div class="muted small">La escala es relativa al ancho de la tarjeta (1 = el modelo ocupa el ancho de la tarjeta). Al editar: si no eliges otro archivo, se conserva el modelo actual.</div>
+      </div>
 
       <div id="editAdjust" class="hidden">
         <label>Ajuste manual de cupo (se registra en el historial)</label>
@@ -485,7 +519,7 @@ function renderCards() {
       <td>${c.poster_url ? `<img class="thumb" src="${esc(c.poster_url)}" alt="">` : '<div class="thumb"></div>'}</td>
       <td><strong>${esc(c.title)}</strong><br><span class="muted small">${esc(c.client_name || '')}</span>
           ${c.low_quota ? '<br><span class="badge agotada">⚠ por agotarse</span>' : ''}</td>
-      <td>${esc(c.event_type || '')}<br><span class="muted small">${esc(fmtDateShort(c.event_date))}</span></td>
+      <td>${esc(c.event_type || '')}<br><span class="muted small">${esc(fmtDateShort(c.event_date))}</span>${c.content_type === 'layers' ? '<br><span class="muted small">Multicapas</span>' : c.content_type === 'model3d' ? '<br><span class="muted small">Modelo 3D</span>' : c.video_mode === 'alpha' ? '<br><span class="muted small">Video sin fondo</span>' : ''}</td>
       <td><span class="badge ${esc(status)}">${esc(status)}</span></td>
       <td><div class="quota-bar ${c.low_quota ? 'low' : ''}"><div style="width:${pct}%"></div></div>
           <span class="small">${c.views_used} / ${c.quota_total} · quedan ${c.remaining}</span></td>
@@ -534,21 +568,96 @@ async function handleCardAction(act, id) {
 // ================= Crear / editar tarjeta =================
 let pickedImage = null;   // { file, img, width, height }
 let pickedVideo = null;   // { file, duration, width, height }
+let pickedModel = null;   // { file }
 
 $('newCardBtn').addEventListener('click', () => openCardForm(null));
 
 function resetFilePickers() {
   pickedImage = null;
   pickedVideo = null;
+  pickedModel = null;
   $('f_image').value = '';
   $('f_video').value = '';
+  $('f_model').value = '';
+  $('layerRows').innerHTML = '';
   $('imagePreview').style.display = 'none';
   $('videoPreview').style.display = 'none';
   $('imageMsg').textContent = '';
   $('videoMsg').textContent = '';
+  $('modelMsg').textContent = '';
+  $('layersMsg').textContent = '';
   $('saveMsg').textContent = '';
   $('saveProgress').style.display = 'none';
 }
+
+// ---------- Contenido: capas y modelo 3D ----------
+
+function onContentTypeChange() {
+  const t = $('f_contentType').value;
+  $('blockVideo').classList.toggle('hidden', t !== 'video');
+  $('blockLayers').classList.toggle('hidden', t !== 'layers');
+  $('blockModel').classList.toggle('hidden', t !== 'model3d');
+}
+
+function addLayerRow() {
+  const rows = $('layerRows');
+  if (rows.children.length >= 4) { toast('Máximo 4 capas por tarjeta'); return; }
+  const idx = rows.children.length;
+  const defDepth = Math.min(10, idx * 3);
+  const row = document.createElement('div');
+  row.className = 'layer-row';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap;';
+  row.innerHTML =
+    '<img class="layer-thumb" style="width:44px;height:44px;object-fit:cover;border-radius:8px;display:none" alt="">' +
+    '<input type="file" class="layer-file" accept="image/png,image/webp,image/jpeg" style="flex:1;min-width:160px">' +
+    '<label class="small">Profundidad <input type="range" class="layer-depth" min="0" max="10" step="1" value="' + defDepth + '" style="vertical-align:middle"> <span class="layer-depth-val">' + defDepth + '</span></label>' +
+    '<button type="button" class="layer-remove" title="Quitar capa">✕</button>';
+  rows.appendChild(row);
+  const fileInput = row.querySelector('.layer-file');
+  const thumb = row.querySelector('.layer-thumb');
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) {
+      thumb.src = URL.createObjectURL(fileInput.files[0]);
+      thumb.style.display = 'block';
+    }
+  });
+  const range = row.querySelector('.layer-depth');
+  range.addEventListener('input', () => {
+    row.querySelector('.layer-depth-val').textContent = range.value;
+  });
+  row.querySelector('.layer-remove').addEventListener('click', () => row.remove());
+}
+
+function readLayerRows() {
+  return [...document.querySelectorAll('.layer-row')]
+    .map((row) => ({
+      file: row.querySelector('.layer-file').files[0] || null,
+      depth: Number(row.querySelector('.layer-depth').value) / 10,
+    }))
+    .filter((r) => r.file);
+}
+
+$('f_contentType').addEventListener('change', onContentTypeChange);
+$('addLayerBtn').addEventListener('click', addLayerRow);
+$('f_model').addEventListener('change', () => {
+  const file = $('f_model').files[0];
+  pickedModel = null;
+  const msg = $('modelMsg');
+  if (!file) { msg.textContent = ''; return; }
+  if (!/\.glb$/i.test(file.name)) {
+    msg.textContent = 'El archivo debe ser .glb (modelo en un solo archivo).';
+    msg.className = 'msg error';
+    return;
+  }
+  if (file.size > 15 * 1048576) {
+    msg.textContent = 'El modelo pesa más de 15 MB: optimízalo (menos polígonos/texturas) antes de subirlo.';
+    msg.className = 'msg error';
+    return;
+  }
+  pickedModel = { file };
+  msg.textContent = `Modelo listo: ${(file.size / 1048576).toFixed(1)} MB.`;
+  msg.className = 'msg ok';
+});
 
 function openCardForm(card) {
   state.editingId = card ? card.id : null;
@@ -561,6 +670,19 @@ function openCardForm(card) {
   $('f_notes').value = card ? card.notes || '' : '';
   $('f_status').value = card ? card.status : 'activa';
   $('f_videoMode').value = card ? card.video_mode || 'normal' : 'normal';
+  $('f_contentType').value = card ? card.content_type || 'video' : 'video';
+  $('f_modelScale').value = card ? card.model_scale || 1 : 1;
+  $('f_modelRot').value = card ? card.model_rotation_y || 0 : 0;
+  $('f_modelUpright').value = card && card.model_upright === false ? '0' : '1';
+  state.existingLayers = card && Array.isArray(card.layers) ? card.layers : [];
+  state.existingModelKey = card ? card.model_key || '' : '';
+  if (state.existingLayers.length) {
+    $('layersMsg').textContent = `Capas actuales: ${state.existingLayers.length} (sube nuevas solo si quieres reemplazarlas).`;
+  }
+  if (state.existingModelKey) {
+    $('modelMsg').textContent = 'Ya hay un modelo subido (elige otro solo si quieres reemplazarlo).';
+  }
+  onContentTypeChange();
   const quotaInput = $('f_quota');
   if (card) {
     quotaInput.value = card.quota_total;
@@ -740,8 +862,25 @@ $('cardForm').addEventListener('submit', async (e) => {
     msg.textContent = text;
     msg.className = 'msg';
   };
-  if (!editing && (!pickedImage || !pickedVideo)) {
-    msg.textContent = 'Para crear la tarjeta necesitas la imagen y el video.';
+  const ctype = $('f_contentType').value;
+  if (!editing && !pickedImage) {
+    msg.textContent = 'Para crear la tarjeta necesitas la imagen del frente.';
+    msg.className = 'msg error';
+    return;
+  }
+  if (!editing && ctype === 'video' && !pickedVideo) {
+    msg.textContent = 'Para crear la tarjeta necesitas el video.';
+    msg.className = 'msg error';
+    return;
+  }
+  if (ctype === 'layers' && readLayerRows().length === 0 &&
+      !(editing && state.existingLayers && state.existingLayers.length)) {
+    msg.textContent = 'Sube al menos una capa (lo ideal: 2 o más, con transparencia).';
+    msg.className = 'msg error';
+    return;
+  }
+  if (ctype === 'model3d' && !pickedModel && !(editing && state.existingModelKey)) {
+    msg.textContent = 'Elige el archivo .glb del modelo 3D.';
     msg.className = 'msg error';
     return;
   }
@@ -762,6 +901,7 @@ $('cardForm').addEventListener('submit', async (e) => {
       notes: $('f_notes').value,
       status: $('f_status').value,
       video_mode: $('f_videoMode').value,
+      content_type: $('f_contentType').value,
     };
     if (!editing) {
       payload.id = cardId;
@@ -792,6 +932,27 @@ $('cardForm').addEventListener('submit', async (e) => {
       payload.poster_key = await uploadFile(cardId, 'poster', posterBlob, 'image/jpeg');
       payload.video_w = pickedVideo.width;
       payload.video_h = pickedVideo.height;
+    }
+    if (payload.content_type === 'layers') {
+      const rows = readLayerRows();
+      if (rows.length) {
+        setProgress(84, 'Subiendo capas…');
+        const layers = [];
+        for (let i = 0; i < rows.length; i++) {
+          const key = await uploadFile(cardId, 'layer' + i, rows[i].file, rows[i].file.type || 'image/png');
+          layers.push({ key, depth: rows[i].depth });
+        }
+        payload.layers = layers;
+      }
+    }
+    if (payload.content_type === 'model3d') {
+      payload.model_scale = Number($('f_modelScale').value) || 1;
+      payload.model_rotation_y = Number($('f_modelRot').value) || 0;
+      payload.model_upright = $('f_modelUpright').value === '1';
+      if (pickedModel) {
+        setProgress(86, 'Subiendo modelo 3D…');
+        payload.model_key = await uploadFile(cardId, 'model', pickedModel.file, 'model/gltf-binary');
+      }
     }
 
     if (editing) {
