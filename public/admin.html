@@ -200,7 +200,7 @@
       </div>
 
       <div id="blockLayers" class="hidden">
-        <label>Capas (PNG con transparencia, de atrás hacia adelante · máx. 4)</label>
+        <label>Capas (imágenes con transparencia, de atrás hacia adelante · máx. 4)</label>
         <div id="layerRows"></div>
         <button type="button" class="btn secondary" id="addLayerBtn">＋ Agregar capa</button>
         <div class="muted small">La profundidad (0–10) decide cuánto flota cada capa sobre la tarjeta al mover el celular: fondo 0, personaje 5, frente/texto 10. Todas las capas deben tener el mismo tamaño y proporción que el frente. Al editar: si no subes capas nuevas, se conservan las actuales.</div>
@@ -599,6 +599,22 @@ function onContentTypeChange() {
   $('blockModel').classList.toggle('hidden', t !== 'model3d');
 }
 
+// Detecta si una imagen trae animación: GIF por tipo; APNG y WebP animado
+// por sus marcas internas (acTL / ANIM) en los primeros bytes del archivo.
+async function detectAnimatedImage(file) {
+  if (file.type === 'image/gif') return true;
+  try {
+    const bytes = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
+    let head = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      head += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    }
+    return head.includes('acTL') || head.includes('ANIM');
+  } catch {
+    return false;
+  }
+}
+
 function addLayerRow() {
   const rows = $('layerRows');
   if (rows.children.length >= 4) { toast('Máximo 4 capas por tarjeta'); return; }
@@ -609,16 +625,25 @@ function addLayerRow() {
   row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap;';
   row.innerHTML =
     '<img class="layer-thumb" style="width:44px;height:44px;object-fit:cover;border-radius:8px;display:none" alt="">' +
-    '<input type="file" class="layer-file" accept="image/png,image/webp,image/jpeg" style="flex:1;min-width:160px">' +
+    '<input type="file" class="layer-file" accept="image/png,image/webp,image/jpeg,image/gif" style="flex:1;min-width:160px">' +
     '<label class="small">Profundidad <input type="range" class="layer-depth" min="0" max="10" step="1" value="' + defDepth + '" style="vertical-align:middle"> <span class="layer-depth-val">' + defDepth + '</span></label>' +
+    '<select class="layer-motion"><option value="none">Sin movimiento</option><option value="float">Flotar</option><option value="spin">Girar</option><option value="pulse">Latido</option></select>' +
+    '<span class="layer-anim small"></span>' +
     '<button type="button" class="layer-remove" title="Quitar capa">✕</button>';
   rows.appendChild(row);
   const fileInput = row.querySelector('.layer-file');
   const thumb = row.querySelector('.layer-thumb');
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) {
-      thumb.src = URL.createObjectURL(fileInput.files[0]);
-      thumb.style.display = 'block';
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files[0];
+    row.dataset.anim = '';
+    const badge = row.querySelector('.layer-anim');
+    badge.textContent = '';
+    if (!f) return;
+    thumb.src = URL.createObjectURL(f);
+    thumb.style.display = 'block';
+    if (await detectAnimatedImage(f)) {
+      row.dataset.anim = '1';
+      badge.textContent = '🎞 animada';
     }
   });
   const range = row.querySelector('.layer-depth');
@@ -633,6 +658,8 @@ function readLayerRows() {
     .map((row) => ({
       file: row.querySelector('.layer-file').files[0] || null,
       depth: Number(row.querySelector('.layer-depth').value) / 10,
+      anim: row.dataset.anim === '1',
+      motion: row.querySelector('.layer-motion').value,
     }))
     .filter((r) => r.file);
 }
@@ -940,7 +967,7 @@ $('cardForm').addEventListener('submit', async (e) => {
         const layers = [];
         for (let i = 0; i < rows.length; i++) {
           const key = await uploadFile(cardId, 'layer' + i, rows[i].file, rows[i].file.type || 'image/png');
-          layers.push({ key, depth: rows[i].depth });
+          layers.push({ key, depth: rows[i].depth, anim: rows[i].anim, motion: rows[i].motion });
         }
         payload.layers = layers;
       }

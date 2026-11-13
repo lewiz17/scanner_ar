@@ -26,6 +26,23 @@ parece tener volumen (efecto 2.5D / paralaje). Claves para que se vea bien:
 - Si el invitado no puede usar la cámara, el respaldo 2D muestra las
   capas superpuestas, como la composición original.
 
+### Capas animadas
+
+Cada capa puede además **moverse**, de dos maneras combinables:
+
+- **Archivo animado:** la capa puede ser un **GIF**, un **APNG** o un
+  **WebP animado** (confeti cayendo, destellos, un personaje saludando).
+  El panel lo detecta solo y lo marca «🎞 animada»; en la tarjeta se
+  reproduce en bucle. Úsalo en 1–2 capas como máximo y con archivos
+  livianos (ideal menos de 2–3 MB): cada capa animada consume CPU del
+  celular del invitado.
+- **Movimiento del plano** (vale también para capas estáticas): en el
+  panel, cada capa tiene un selector de movimiento:
+  - **Flotar:** sube y baja suavemente, como respirando.
+  - **Girar:** rota despacio sobre su centro (ideal para destellos,
+    estrellas, un aro de flores).
+  - **Latido:** pulsa su tamaño (ideal para un corazón o el texto).
+
 ## 3. Modelo 3D (.glb)
 Subes un modelo en formato **.glb** (un solo archivo, máx. **15 MB**;
 ideal menos de 10 MB y pocos polígonos para que cargue rápido en el
