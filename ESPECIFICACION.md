@@ -1,8 +1,9 @@
 # Tarjetas Mágicas — Especificación del producto y de la plataforma
 
-> Estado: especificación v1 para construir el MVP.
+> Estado: especificación v1.1 para construir el MVP.
 > Base técnica actual: las experiencias demo de este repo (`cr7/`, `messi/`) hechas con MindAR + A-Frame.
 > Objetivo: convertir ese demo en una plataforma Node.js que produzca tarjetas físicas con realidad aumentada, vendibles por redes sociales para eventos.
+> **Hosting (decisión 2026-11-13):** todo corre en **Vercel** (app y funciones serverless, plan Hobby), con los datos en **Neon** (Postgres) y los archivos (imagen, video, marcador, póster) en **Cloudflare R2**, cuyo ancho de banda de salida es gratuito. Ver §8 y el registro de decisiones en §12.
 
 ---
 
@@ -63,7 +64,7 @@ Una **tarjeta impresa personalizada** (o un pack de tarjetas idénticas) para un
 
 1. Panel de administración web con login.
 2. Crear/editar/pausar/eliminar tarjetas subiendo **solo imagen y video**; el marcador se compila automáticamente.
-3. Compresión automática del video al subirlo y generación del póster (imagen de portada del video).
+3. Validación del video al subirlo (duración/tamaño/resolución) con compresión opcional en el navegador del admin, y generación del póster (imagen de portada del video) también en el navegador. En Vercel no hay procesamiento de video del lado del servidor (§8.1).
 4. Página pública de experiencia por tarjeta (`/v/<slug>`) generada desde una plantilla única (la evolución de las páginas `cr7/` y `messi/` de este repo).
 5. Contador de vistas por tarjeta con cupo, deduplicación anti-abuso y registro de eventos.
 6. Bloqueo elegante al agotar el cupo, con botón de WhatsApp para recarga.
@@ -101,7 +102,7 @@ Una **tarjeta impresa personalizada** (o un pack de tarjetas idénticas) para un
 4. El sistema, automáticamente:
    a. Valida formatos y tamaños.
    b. **Compila el marcador** `.mind` desde la imagen (§8.3) y calcula su **calidad de seguimiento** (cantidad de puntos característicos). Si la calidad es baja, avisa antes de activar: «esta imagen puede fallar al escanearla; pide una con más detalle/contraste». El admin decide si continúa.
-   c. **Comprime el video** con ffmpeg a un máximo listo para streaming móvil y extrae el **póster** (primer frame nítido).
+   c. **Valida el video** (duración/tamaño/resolución, §7.2) y extrae el **póster** (primer frame nítido) — ambos en el navegador del admin, antes de subir los archivos a R2.
    d. Genera el **slug** público (código corto no adivinable, ej. `boda-ana-luis-x7k2`).
    e. Genera el **QR** de `/v/<slug>`.
 5. El admin asigna el **cupo inicial** (por defecto, el de los ajustes) y **activa** la tarjeta.
@@ -193,8 +194,8 @@ Se cuenta **una** vista cuando ocurre la primera de estas dos cosas en una sesi�
 
 ### 6.3 Control de cupo (en el servidor, no en el cliente)
 
-- El servidor **no entrega** el `.mind` ni el video si la tarjeta no está `activa` o su cupo es 0: se sirven mediante endpoints que verifican estado y cupo (`/v/<slug>/assets/...`), no como archivos estáticos públicos directos.
-- El decremento del cupo es **atómico** en la base de datos (una sola operación que verifica `quota > 0` y resta), para que dos invitados simultáneos no puedan gastar la misma última vista dos veces.
+- El sistema **no entrega** el `.mind` ni el video si la tarjeta no está `activa` o su cupo es 0: los archivos viven en un bucket **privado** de Cloudflare R2 y solo se accede a ellos mediante endpoints de la app que verifican estado y cupo y responden con una redirección (302) a una **URL firmada de R2 que expira en ~60 segundos**. El video y el marcador nunca tienen URL pública permanente. (La ventana de validez es corta a propósito: si alguien comparte el enlace firmado, muere en segundos; el conteo de vistas ocurre por sesión, §6.2, no por descarga del archivo.)
+- El decremento del cupo es **atómico** en Neon (una sola sentencia `UPDATE ... WHERE quota_total - views_used > 0 ... RETURNING`), para que dos invitados simultáneos no puedan gastar la misma última vista dos veces.
 - Si el conteo falla por red justo al reproducir, el video no se bloquea a mitad de reproducción: el conteo es optimista en el cliente y autoritativo en el servidor en el siguiente acceso.
 
 ---
@@ -209,7 +210,7 @@ Se cuenta **una** vista cuando ocurre la primera de estas dos cosas en una sesi�
 
 ### 7.2 Video (o animación)
 
-- Formatos de entrada: MP4, WebM o MOV. El sistema lo convierte siempre a **MP4 (H.264) + versión WebM opcional**, vertical u horizontal según el original, máx. **720p** y máx. **8 MB** tras compresión (objetivo: que cargue en el wifi de un salón de eventos).
+- Formatos de entrada: MP4, WebM o MOV. En Vercel **no hay transcodificación del lado del servidor** (sin ffmpeg), así que el archivo se sirve tal como se subió, desde R2: el panel **valida** antes de aceptar (máx. **90 s**, máx. **25 MB**, y avisa si supera **720p** u **8 MB**: el objetivo sigue siendo que cargue en el wifi de un salón de eventos) y ofrece **compresión en el propio navegador del admin** como paso opcional previo a la subida.
 - Duración recomendada: 15–60 s. Máximo aceptado: 90 s.
 - Orientación: se recomienda que coincida con la de la imagen (si la foto es vertical, video vertical) para que el encaje se vea natural.
 - Audio: se conserva. En móvil arranca tras el gesto de «Activar cámara»; si el navegador lo bloquea, arranca silenciado con botón de sonido visible.
@@ -218,39 +219,39 @@ Se cuenta **una** vista cuando ocurre la primera de estas dos cosas en una sesi�
 
 ## 8. Arquitectura técnica propuesta (MVP)
 
-### 8.1 Stack
+### 8.1 Stack (arquitectura serverless en Vercel)
 
-- **Node.js 20+ con Express** (mismo stack que Lyam ya usa en Aurora: curva de aprendizaje cero).
-- **SQLite** (archivo único, vía `better-sqlite3` o el `node:sqlite` de Node 22+) para el MVP: cero configuración, copias de seguridad triviales. Migrable a Postgres si el volumen lo exige (la capa de datos se aísla en un módulo `store`).
-- **Frontend**: HTML/CSS/JS sin framework, como el panel de Aurora — un solo archivo por vista si es práctico. La experiencia usa **MindAR 1.2.2 + A-Frame 1.4.2** servidos localmente (no desde CDN público, para no depender de terceros el día del evento).
-- **ffmpeg** en el servidor para compresión de video y extracción del póster.
-- **Librería `qrcode`** para generar el QR (PNG/SVG).
-- Almacenamiento de archivos en disco bajo `DATA_DIR` (imagen, `.mind`, video, póster por tarjeta). Estructura preparada para mover a S3/R2 después (URLs siempre generadas por la app, nunca rutas físicas expuestas).
+Todo el sistema está pensado para **Vercel**: sin servidor permanente, sin disco local y sin binarios del sistema. Cada pieza vive en el servicio que mejor la resuelve:
+
+- **App y API en Vercel (plan Hobby):** funciones serverless de Node.js (endpoints `/api/...`) + páginas estáticas servidas por el CDN de Vercel. El proyecto sigue siendo Node.js; lo que cambia es que cada petición la atiende una función efímera, no un proceso Express siempre encendido.
+- **Base de datos en Neon (Postgres serverless):** tarjetas, vistas, recargas y ajustes. Se accede con el driver serverless de Neon (HTTP), pensado para funciones sin estado: sin pool de conexiones que gestionar. Las credenciales van en variables de entorno de Vercel (`DATABASE_URL`).
+- **Archivos en Cloudflare R2 (bucket privado):** imagen original, `.mind`, video y póster de cada tarjeta. Motivos: la salida de datos (egress) de R2 es **gratuita** — el video es ~99 % del ancho de banda del producto y así **no consume la cuota de transferencia de Vercel** (100 GB/mes en Hobby) — y las URLs firmadas permiten el control de cupo de §6.3. Las subidas del admin van **directas del navegador a R2** con URLs firmadas de subida (las funciones de Vercel limitan el cuerpo de cada petición a ~4,5 MB; el video nunca pasa por la función).
+- **Sin ffmpeg ni procesamiento pesado en el servidor:** la compresión opcional de video, la extracción del póster y la compilación del marcador ocurren en el **navegador del admin** (§7.2 y §8.3).
+- **Frontend**: HTML/CSS/JS sin framework, como el panel de Aurora. La experiencia usa **MindAR 1.2.2 + A-Frame 1.4.2** servidos desde el propio despliegue (no desde CDN público, para no depender de terceros el día del evento).
+- **QR**: generado en el panel con la librería `qrcode` en el navegador (PNG/SVG descargables al momento), sin pasar por el servidor.
+- **Dominio y DNS en Cloudflare** (§8.6): el dominio se registra y gestiona fuera de Vercel, apuntando a Vercel por DNS. Así, si algún día la app se mueve de proveedor, se reapunta el DNS y **los QR impresos siguen vivos**.
 
 ### 8.2 Rutas principales
 
 | Ruta | Quién | Qué |
 |---|---|---|
 | `/` | Público | Página comercial simple del negocio (qué es, ejemplos, botón de WhatsApp). |
-| `/v/<slug>` | Invitados | La experiencia. HTML generado por tarjeta (plantilla única). |
-| `/v/<slug>/assets/marker.mind` | Invitados | Sirve el marcador **solo si** la tarjeta está activa y con cupo (cabeceras anti-caché adecuadas). |
-| `/v/<slug>/assets/video.mp4` | Invitados | Sirve el video con soporte de `Range` (streaming), mismas verificaciones. |
-| `/v/<slug>/assets/poster.jpg` | Invitados | Póster para la pantalla de bienvenida y el respaldo 2D. |
+| `/v/<slug>` | Invitados | La experiencia. Página generada por tarjeta (plantilla única) desde una función que lee Neon. |
+| `/api/v/<slug>/asset?kind=marker\|video\|poster` | Invitados | Verifica estado y cupo en Neon y redirige (302) a la **URL firmada de R2** (expira ~60 s). R2 sirve los bytes con soporte de `Range`. |
 | `/api/v/<slug>/session` | Invitados | Crea la sesión firmada de experiencia y devuelve el estado (activa/agotada/pausada). |
-| `/api/v/<slug>/view` | Invitados | Registra la vista (token de sesión; aplica §6). |
+| `/api/v/<slug>/view` | Invitados | Registra la vista (token de sesión; aplica §6) y descuenta el cupo en Neon de forma atómica. |
 | `/admin` | Admin | Panel (login, tarjetas, ajustes, estadísticas). |
-| `/api/admin/...` | Admin | CRUD de tarjetas, subida de archivos, recargas, ajustes, QR. |
+| `/api/admin/...` | Admin | CRUD de tarjetas (Neon), emisión de URLs firmadas de **subida** a R2, recargas, ajustes. |
 
-### 8.3 Compilación automática del marcador (decisión técnica clave)
+### 8.3 Compilación automática del marcador (decisión cerrada)
 
-El cliente **nunca** sube un `.mind`: solo imagen y video. Hay dos vías para compilarlo sin intervención humana, y el MVP implementa la primera que pase el spike de validación (hito M0, §11):
+El cliente **nunca** sube un `.mind`: solo imagen y video. En la arquitectura Vercel la compilación en el servidor no es viable (funciones efímeras, con límites de tiempo y memoria, y el compilador de MindAR es pesado), así que la decisión está tomada:
 
-1. **En el servidor (preferida):** ejecutar el compilador oficial de MindAR en Node durante la creación de la tarjeta (proceso en segundo plano; la tarjeta pasa a `activa` cuando el marcador está listo). Ventaja: flujo 100 % automático en un solo paso.
-2. **En el navegador del admin (respaldo garantizado):** el panel compila la imagen con el compilador web oficial de MindAR mientras el admin rellena el formulario, y sube el `.mind` junto con la imagen y el video. Para el admin el flujo es idéntico («subir imagen y video»); la compilación es invisible.
+- **El marcador se compila en el navegador del admin**, con el compilador web oficial de MindAR, mientras el admin rellena el formulario de la tarjeta. Al guardar, el panel sube a R2 la imagen, el video, el póster y el `.mind` ya compilado. Para el admin el flujo sigue siendo «subir imagen y video»: la compilación es automática e invisible.
+- Se guarda también la **imagen original** (la que se imprime) y la métrica de calidad del marcador para el aviso de §4.2.
+- El hito M0 (§11) valida este flujo de punta a punta en un celular real antes de construir el resto.
 
-En ambos casos se guarda también la **imagen original** (la que se imprime) y se calcula la métrica de calidad del marcador para el aviso de §4.2.
-
-### 8.4 Modelo de datos (SQLite)
+### 8.4 Modelo de datos (Neon / Postgres)
 
 **`cards`** — una fila por tarjeta:
 
@@ -258,7 +259,7 @@ En ambos casos se guarda también la **imagen original** (la que se imprime) y s
 |---|---|
 | `id`, `slug` (único) | slug público no adivinable |
 | `title`, `client_name`, `event_type`, `event_date`, `notes` | datos de gestión |
-| `image_path`, `marker_path`, `video_path`, `poster_path` | rutas internas bajo `DATA_DIR` |
+| `image_key`, `marker_key`, `video_key`, `poster_key` | claves de los objetos en el bucket de R2 |
 | `image_w`, `image_h`, `marker_quality` | proporción del plano y calidad de seguimiento |
 | `quota_total`, `views_used` | cupo y consumo (el saldo = `quota_total - views_used`) |
 | `status` | `borrador` / `activa` / `pausada` / `agotada` / `archivada` |
@@ -280,25 +281,29 @@ scanner_ar/
 ├── cr7/  messi/            # demos originales (referencia y plantilla)
 ├── ESPECIFICACION.md       # este documento
 ├── package.json
-├── src/
-│   ├── index.js            # arranque Express, rutas públicas
-│   ├── store.js            # capa de datos (SQLite)
+├── vercel.json             # rutas: /v/<slug> y /admin servidos por funciones/páginas
+├── api/
+│   ├── v/[slug]/           # funciones públicas: página, asset (302 a R2), session, view
+│   └── admin/              # funciones del panel: tarjetas, uploads firmados, recargas, ajustes
+├── lib/
+│   ├── db.js               # acceso a Neon (driver serverless)
 │   ├── cards.js            # lógica de tarjetas y cupo (§6)
-│   ├── media.js            # ffmpeg: compresión y póster; compilación del marcador
-│   ├── qr.js               # generación de QR
-│   ├── admin.js            # API del panel
-│   └── views/
-│       ├── experience.html # plantilla de /v/<slug> (MindAR + A-Frame)
-│       └── admin.html      # panel (un solo archivo)
-├── data/                   # DATA_DIR (fuera de git): uploads por tarjeta + SQLite
+│   ├── r2.js               # URLs firmadas de subida/descarga (SDK S3)
+│   └── auth.js             # sesión del admin
+├── public/
+│   ├── experience.html     # plantilla de la experiencia (MindAR + A-Frame, assets locales)
+│   └── admin.html          # panel (un solo archivo; compila el .mind y genera el QR en el navegador)
 └── tests/
 ```
 
+Fuera del repo (configuración, no código): base de datos en **Neon**, bucket privado en **Cloudflare R2** (con CORS que permita las subidas desde el dominio del panel y las descargas firmadas), variables de entorno en **Vercel** (`DATABASE_URL`, credenciales R2, secreto de sesión).
+
 ### 8.6 Despliegue
 
-- Un solo proceso Node con `DATA_DIR` persistente (mismo patrón que Aurora: VPS pequeño, Docker o servicio systemd + Caddy/Nginx con **HTTPS obligatorio** — sin HTTPS ningún navegador da acceso a la cámara).
-- Requisito duro: el dominio debe ser **estable** — los QR impresos apuntan a él para siempre. Cambiar de dominio invalida las tarjetas en la calle. Elegir dominio propio desde el día uno.
-- Copias de seguridad: carpeta `data/` completa (archivos + SQLite).
+- **Vercel** despliega la app desde este repo (funciones + estáticos), con **HTTPS automático** — sin HTTPS ningún navegador da acceso a la cámara.
+- Requisito duro: el dominio debe ser **estable** — los QR impresos apuntan a él para siempre. Por eso el dominio se **registra en Cloudflare Registrar (o se transfiere ahí) y el DNS se gestiona en Cloudflare**, apuntando a Vercel: el activo permanente es el dominio, no el proveedor de hosting. Si Vercel fallara o hubiera que migrar (a Pro, o a Cloudflare Pages/Workers), se reapunta el DNS y las tarjetas en la calle no se enteran.
+- Datos en **Neon** y archivos en **R2**: ambos son independientes de Vercel, así que una migración de la app no toca ni las tarjetas ni su historial.
+- Copias de seguridad: export periódico de Neon (o su point-in-time propio) y versionado/segunda copia del bucket R2 para los archivos originales.
 
 ---
 
@@ -308,7 +313,8 @@ scanner_ar/
 - **Compatibilidad:** Safari iOS 16+ y Chrome Android recientes como objetivo principal (es el parque real de los invitados). Probar también Samsung Internet y navegadores in-app de Instagram/WhatsApp, con el respaldo 2D (§4.3 paso 6) como red de seguridad.
 - **Seguridad:** panel tras login con sesiones seguras; subida de archivos validada por tipo real (no solo extensión) y con límites de tamaño; slugs no secuenciales; endpoints de conteo con rate-limit; cabeceras `Cache-Control` que eviten que el video/marcador queden en cachés públicas.
 - **Privacidad:** no se recogen datos personales de los invitados. Solo conteos agregados y clase de dispositivo. Sin cookies de terceros en la experiencia.
-- **Disponibilidad:** es un producto de «momento único» (el día del evento): el hosting debe estar despierto siempre (nada de planes que duerman el servicio).
+- **Disponibilidad:** es un producto de «momento único» (el día del evento): la arquitectura serverless no se duerme (no hay arranque en frío de minutos como en los planes gratuitos con spin-down), y cada pieza (Vercel, Neon, R2) tiene disponibilidad independiente.
+- **Presupuesto de ancho de banda (plan Hobby):** la transferencia de Vercel (100 GB/mes incluidos en Hobby) cubre solo HTML, la plantilla y las llamadas a funciones, porque **los medios se sirven desde R2, cuya salida es gratuita**. Regla de oro de la implementación: ningún byte de video/marcador/póster puede pasar por una función de Vercel. Las invocaciones de funciones en Hobby (1 M/mes) son de sobra para sesiones y conteos.
 
 ---
 
@@ -321,7 +327,8 @@ scanner_ar/
 | Wifi del salón lento → el video tarda | Compresión agresiva (§7.2), póster inmediato, carga progresiva y mensaje «cargando…» amable. |
 | iOS bloquea audio/cámara | Botón «Activar cámara» como gesto inicial (§4.3), video que arranca silenciado si hace falta y botón de sonido. |
 | Un invitado (o un bot) quema el cupo refrescando | Definición de vista (§6.1) + token de sesión + deduplicación por dispositivo (§6.2). |
-| Se cae el servidor el día del evento | Hosting siempre activo (§9) + copias de `data/`; plan B documentado: el respaldo 2D depende del mismo servidor, así que la disponibilidad es **el** requisito crítico. |
+| Se cae una pieza el día del evento | Vercel, Neon y R2 son servicios gestionados e independientes entre sí; la disponibilidad sigue siendo **el** requisito crítico (del respaldo 2D también depende la misma cadena), y por eso el dominio vive en Cloudflare (§8.6): si la app hubiera que moverla de proveedor, el DNS se reapunta y los QR sobreviven. |
+| **Vercel Hobby es, según sus normas de uso justo, solo para proyectos personales no comerciales** | Decisión del dueño (2026-11-13, §12): arrancar en Hobby aun vendiendo tarjetas, **asumiendo el riesgo** de que Vercel pueda pausar el despliegue por uso comercial. La arquitectura está diseñada para que ese golpe no sea fatal: datos en Neon, archivos en R2 y dominio en Cloudflare — migrar la app a Vercel Pro o a otro proveedor no toca tarjetas, cupos ni QR impresos. Revisar esta decisión al primer aviso de Vercel o cuando el volumen lo justifique. |
 | Cambiar de dominio/hosting con tarjetas ya impresas | Dominio propio estable desde el inicio (§8.6); los slugs no cambian nunca. |
 
 ---
@@ -330,19 +337,28 @@ scanner_ar/
 
 | Hito | Contenido | Criterio de aceptación |
 |---|---|---|
-| **M0 — Spike técnico** | Validar la compilación del marcador en servidor (§8.3 vía 1); si no es viable, confirmar la vía 2. Comprimir un video de prueba con ffmpeg. | Un script que, dada una imagen, produce un `.mind` que MindAR reconoce en un celular real. |
-| **M1 — Núcleo** | Express + SQLite + login admin + CRUD de tarjetas con subida de imagen/video, compresión, póster y marcador. | Crear una tarjeta completa desde el panel sin tocar archivos a mano. |
+| **M0 — Spike técnico** | Validar el flujo serverless completo en miniatura: el panel compila el `.mind` en el navegador, sube imagen/video/marcador a R2 con URL firmada, la experiencia lo lee vía redirección firmada tras verificar Neon, y una vista de prueba descuenta el cupo atómicamente. | Con una imagen de prueba, el AR funciona en un celular real servido desde Vercel + R2, y el contador de Neon baja de 1 en 1 sin duplicarse al refrescar. |
+| **M1 — Núcleo** | Proyecto Vercel + Neon + R2 conectados; login admin; CRUD de tarjetas con subida directa a R2, compilación del marcador y póster en el navegador. | Crear una tarjeta completa desde el panel sin tocar archivos a mano. |
 | **M2 — Experiencia** | Plantilla `/v/<slug>` con bienvenida, AR, respaldo 2D y controles; activos servidos con verificación de estado/cupo. | Con una tarjeta impresa de prueba, un invitado completa el flujo en iOS y Android. |
 | **M3 — Cupo y recargas** | Sesiones firmadas, conteo §6, bloqueo al agotar, botón de WhatsApp, ajustes de paquetes/precios, aplicar recargas, historial y estadísticas básicas. | Agotar una tarjeta de prueba a propósito: se bloquea, el WhatsApp trae el mensaje correcto y la recarga la revive al instante. |
 | **M4 — Kit de imprenta y pulido** | Descarga de QR PNG/SVG, instrucciones de reverso, página comercial `/`, textos finales, pruebas en dispositivos reales. | Pack de prueba impreso y escaneado por 3 personas distintas sin ayuda. |
-| **M5 — Despliegue** | Dominio propio + HTTPS + proceso siempre activo + copias de seguridad. | La experiencia funciona desde la calle, con datos móviles, en un dominio definitivo. |
+| **M5 — Despliegue** | Dominio propio registrado en Cloudflare apuntando a Vercel + HTTPS + variables de entorno + copias de seguridad de Neon y R2. | La experiencia funciona desde la calle, con datos móviles, en un dominio definitivo. |
 
 ---
 
-## 12. Decisiones abiertas (a definir por Lyam antes o durante el M1)
+## 12. Decisiones
+
+### Tomadas
+
+- **2026-11-13 — Primero la especificación, después el código.** Se escribe y aprueba este documento antes de construir.
+- **2026-11-13 — Hosting: todo en Vercel, datos en Neon, medios en Cloudflare R2** (§8). La app y las funciones corren en Vercel; Neon guarda tarjetas/vistas/recargas/ajustes; R2 guarda imagen/video/marcador/póster porque su ancho de banda de salida es gratuito y así el video no consume la cuota de transferencia de Vercel.
+- **2026-11-13 — Plan de Vercel: Hobby (gratuito), aun ofreciendo tarjetas a la venta.** Decisión del dueño con el riesgo explícito de §10: las normas de Vercel reservan Hobby para uso no comercial y el despliegue podría ser pausado; la arquitectura desacoplada (Neon + R2 + dominio en Cloudflare) es la mitigación acordada.
+- **2026-11-13 — El marcador se compila en el navegador del admin** (§8.3); no hay compilación ni ffmpeg en el servidor.
+
+### Abiertas (a definir por Lyam antes o durante el M1)
 
 1. **Nombre comercial** del producto (la spec usa «Tarjetas Mágicas» como nombre de trabajo).
-2. **Dominio** definitivo y hosting (debe ser estable y siempre activo).
+2. **Nombre de dominio** definitivo (el registro y el DNS ya está decidido que vivan en Cloudflare, §8.6; falta elegir el nombre).
 3. **Número de WhatsApp** del negocio y **precios** de los paquetes 50/100/200 y del pack impreso/digital.
 4. **Cupo incluido** por defecto en cada venta y si el pack impreso y el digital incluyen cupos distintos.
 5. Quién imprime las tarjetas (imprenta local aliada vs. el cliente) y en qué material/tamaño estándar se ofrece (sugerencia: 9×5,5 cm o 10×7 cm, laminado mate — el brillo produce reflejos que dificultan el reconocimiento).
