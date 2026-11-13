@@ -1,0 +1,1 @@
+{"$schema":"https://openapi.vercel.sh/vercel.json","headers":[{"headers":[{"key":"Cache-Control","value":"public, max-age=31536000, immutable"}],"source":"/vendor/(.*)"}],"rewrites":[{"destination":"/api/v/page?slug=:slug","source":"/v/:slug"},{"destination":"/admin.html","source":"/admin"}]}
