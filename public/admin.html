@@ -314,6 +314,12 @@
         <button type="submit" class="btn">Guardar ajustes</button>
       </div>
     </form>
+    <div style="border-top:1px solid #e5e0d5; margin-top:18px; padding-top:14px">
+      <h3 style="margin:0 0 6px">Mantenimiento de la base de datos</h3>
+      <p class="sub">Tras desplegar una versión nueva, vuelve a ejecutar la inicialización: crea las columnas nuevas (video sin fondo, multicapas, modelo 3D) sin borrar ningún dato. Te pedirá el SETUP_SECRET de Vercel.</p>
+      <button type="button" class="btn secondary" id="initBtnSettings">Re-ejecutar inicialización</button>
+      <div class="msg" id="initMsgSettings"></div>
+    </div>
   </div>
 </div>
 
@@ -396,6 +402,7 @@ async function runSetup(msgEl) {
 }
 $('initBtnLogin').addEventListener('click', () => runSetup($('initMsgLogin')));
 $('initBtnApp').addEventListener('click', () => runSetup($('initMsgApp')));
+$('initBtnSettings').addEventListener('click', () => runSetup($('initMsgSettings')));
 
 // ================= Arranque / sesión =================
 async function boot() {
