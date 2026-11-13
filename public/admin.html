@@ -234,6 +234,7 @@
       <div class="progress" id="saveProgress"><div></div></div>
       <div class="msg" id="saveMsg"></div>
       <div class="foot">
+        <button type="button" class="btn hidden" id="deleteCardBtn" style="background:#b3382e;margin-right:auto">Eliminar tarjeta</button>
         <button type="button" class="btn secondary" data-close="cardModal">Cancelar</button>
         <button type="submit" class="btn" id="saveCardBtn">Guardar tarjeta</button>
       </div>
@@ -403,6 +404,20 @@ async function runSetup(msgEl) {
 $('initBtnLogin').addEventListener('click', () => runSetup($('initMsgLogin')));
 $('initBtnApp').addEventListener('click', () => runSetup($('initMsgApp')));
 $('initBtnSettings').addEventListener('click', () => runSetup($('initMsgSettings')));
+
+$('deleteCardBtn').addEventListener('click', async () => {
+  const id = state.editingId;
+  if (!id) return;
+  if (!window.confirm('¿Eliminar esta tarjeta PARA SIEMPRE? Se borran también sus archivos, su historial de vistas y las recargas. No se puede deshacer.')) return;
+  try {
+    await api(`/api/admin/cards/${id}`, { method: 'DELETE' });
+    toast('Tarjeta eliminada');
+    closeModal('cardModal');
+    await loadCards();
+  } catch (err) {
+    toast('Error al eliminar: ' + err.message, 4500);
+  }
+});
 
 // ================= Arranque / sesión =================
 async function boot() {
@@ -635,6 +650,8 @@ function addLayerRow() {
     '<input type="file" class="layer-file" accept="image/png,image/webp,image/jpeg,image/gif" style="flex:1;min-width:160px">' +
     '<label class="small">Profundidad <input type="range" class="layer-depth" min="0" max="10" step="1" value="' + defDepth + '" style="vertical-align:middle"> <span class="layer-depth-val">' + defDepth + '</span></label>' +
     '<select class="layer-motion"><option value="none">Sin movimiento</option><option value="float">Flotar</option><option value="spin">Girar</option><option value="pulse">Latido</option></select>' +
+    '<label class="small">↔ <input type="range" class="layer-ox" min="-50" max="50" step="1" value="0" style="vertical-align:middle;width:84px"> <span class="layer-ox-val">0%</span></label>' +
+    '<label class="small">↕ <input type="range" class="layer-oy" min="-50" max="50" step="1" value="0" style="vertical-align:middle;width:84px"> <span class="layer-oy-val">0%</span></label>' +
     '<span class="layer-anim small"></span>' +
     '<button type="button" class="layer-remove" title="Quitar capa">✕</button>';
   rows.appendChild(row);
@@ -657,6 +674,14 @@ function addLayerRow() {
   range.addEventListener('input', () => {
     row.querySelector('.layer-depth-val').textContent = range.value;
   });
+  const oxRange = row.querySelector('.layer-ox');
+  oxRange.addEventListener('input', () => {
+    row.querySelector('.layer-ox-val').textContent = oxRange.value + '%';
+  });
+  const oyRange = row.querySelector('.layer-oy');
+  oyRange.addEventListener('input', () => {
+    row.querySelector('.layer-oy-val').textContent = oyRange.value + '%';
+  });
   row.querySelector('.layer-remove').addEventListener('click', () => row.remove());
 }
 
@@ -667,6 +692,8 @@ function readLayerRows() {
       depth: Number(row.querySelector('.layer-depth').value) / 10,
       anim: row.dataset.anim === '1',
       motion: row.querySelector('.layer-motion').value,
+      ox: Number(row.querySelector('.layer-ox').value) / 100,
+      oy: Number(row.querySelector('.layer-oy').value) / 100,
     }))
     .filter((r) => r.file);
 }
@@ -708,6 +735,7 @@ function openCardForm(card) {
   $('f_modelScale').value = card ? card.model_scale || 1 : 1;
   $('f_modelRot').value = card ? card.model_rotation_y || 0 : 0;
   $('f_modelUpright').value = card && card.model_upright === false ? '0' : '1';
+  $('deleteCardBtn').classList.toggle('hidden', !card);
   state.existingLayers = card && Array.isArray(card.layers) ? card.layers : [];
   state.existingModelKey = card ? card.model_key || '' : '';
   if (state.existingLayers.length) {
@@ -974,7 +1002,7 @@ $('cardForm').addEventListener('submit', async (e) => {
         const layers = [];
         for (let i = 0; i < rows.length; i++) {
           const key = await uploadFile(cardId, 'layer' + i, rows[i].file, rows[i].file.type || 'image/png');
-          layers.push({ key, depth: rows[i].depth, anim: rows[i].anim, motion: rows[i].motion });
+          layers.push({ key, depth: rows[i].depth, anim: rows[i].anim, motion: rows[i].motion, ox: rows[i].ox, oy: rows[i].oy });
         }
         payload.layers = layers;
       }

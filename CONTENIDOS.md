@@ -26,6 +26,21 @@ parece tener volumen (efecto 2.5D / paralaje). Claves para que se vea bien:
 - Si el invitado no puede usar la cámara, el respaldo 2D muestra las
   capas superpuestas, como la composición original.
 
+### Posición de cada capa (salirse de la tarjeta)
+
+Cada capa tiene además dos deslizadores de posición:
+
+- **↔ horizontal** (−50% a +50% del ancho de la tarjeta)
+- **↕ vertical** (−50% a +50%)
+
+Combinados con la profundidad, permiten que un elemento «viva» fuera de
+la foto: por ejemplo, el personaje desplazado hacia arriba y con
+profundidad 6 parece estar **parado sobre el borde superior** de la
+tarjeta, y una capa de globos a un lado con profundidad 9 flota junto a
+ella. Las capas se ven una detrás de otra según su profundidad, así que
+el orden + profundidad + posición es lo que construye la escena 3D.
+En el respaldo 2D los desplazamientos también se aplican (aproximados).
+
 ### Capas animadas
 
 Cada capa puede además **moverse**, de dos maneras combinables:
