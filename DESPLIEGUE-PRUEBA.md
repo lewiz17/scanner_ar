@@ -135,11 +135,12 @@ Además decide ahora:
 6. Al terminar, Vercel te muestra tu dominio, algo como
    `https://scanner-ar-xxxx.vercel.app`. **Anótalo.**
 7. **Apunta la rama de la prueba:** entra a tu proyecto en Vercel →
-   **Settings → Git → Production Branch** → elige
-   **`plataforma-mvp`** → Save. Luego ve a **Deployments**, abre el menú
-   **⋯** del despliegue más reciente y pulsa **Redeploy** para que tome
-   esa rama. (Cuando la plataforma esté probada, esta rama se unirá a
-   `main` y este paso dejará de hacer falta.)
+   **Settings → Environments → Production → Branch Tracking** → escribe
+   **`plataforma-mvp`** → Save. (Ojo: ya no está en Settings → Git; Vercel
+   lo movió a Environments.) Luego ve a **Deployments**, abre el
+   despliegue más reciente de la rama `plataforma-mvp` y en su menú **⋯**
+   pulsa **Promote to Production**. (Cuando la plataforma esté probada,
+   esta rama se unirá a `main` y este paso dejará de hacer falta.)
 8. **Vuelve al Paso 2.1** y actualiza el CORS del bucket con tu dominio
    real de Vercel.
 
