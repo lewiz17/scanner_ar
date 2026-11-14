@@ -27,6 +27,35 @@ function segments(req) {
   }
 }
 
+function urlParams(req) {
+  try {
+    return Object.fromEntries(new URL(req.url, 'http://internal').searchParams.entries());
+  } catch {
+    return {};
+  }
+}
+
+// En el despliegue de producción (wmagic.vercel.app, verificado el
+// 2026-11-14) esta función solo recibe rutas de UN segmento tras
+// /api/admin/: las de 2+ segmentos devuelven el 404 HTML de la plataforma
+// sin llegar aquí. Por eso las operaciones por tarjeta también aceptan la
+// forma de un segmento con query: /api/admin/cards?id=<uuid>&action=<op>.
+async function cardsRoute(req, res) {
+  const params = { ...urlParams(req), ...(req.query || {}) };
+  req.query = params;
+  if (params.id && params.action === 'recharge') return await recharge(req, res);
+  if (params.id && params.action === 'delete') {
+    req.forceDelete = true;
+    return await card(req, res);
+  }
+  if (params.id && params.action === 'archive') {
+    req.forceArchive = true;
+    return await card(req, res);
+  }
+  if (params.id && req.method !== 'POST') return await card(req, res);
+  return await cards(req, res);
+}
+
 module.exports = async function handler(req, res) {
   const seg = segments(req);
   try {
@@ -36,7 +65,7 @@ module.exports = async function handler(req, res) {
         case 'login': return await login(req, res);
         case 'logout': return await logout(req, res);
         case 'me': return await me(req, res);
-        case 'cards': return await cards(req, res);
+        case 'cards': return await cardsRoute(req, res);
         case 'settings': return await settings(req, res);
         case 'upload-url': return await uploadUrl(req, res);
         case 'asset-url': return await assetUrl(req, res);

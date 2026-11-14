@@ -410,7 +410,7 @@ $('deleteCardBtn').addEventListener('click', async () => {
   if (!id) return;
   if (!window.confirm('¿Eliminar esta tarjeta PARA SIEMPRE? Se borran también sus archivos, su historial de vistas y las recargas. No se puede deshacer.')) return;
   try {
-    await api(`/api/admin/cards/${id}/delete`, { method: 'POST' });
+    await api(`/api/admin/cards?id=${id}&action=delete`, { method: 'POST' });
     toast('Tarjeta eliminada');
     closeModal('cardModal');
     await loadCards();
@@ -574,7 +574,7 @@ async function handleCardAction(act, id) {
   if (act === 'archive') {
     if (!window.confirm(`¿Archivar «${card.title}»? Dejará de mostrarse en la lista principal y la experiencia quedará inactiva.`)) return;
     try {
-      await api(`/api/admin/cards/${id}/archive`, { method: 'POST' });
+      await api(`/api/admin/cards?id=${id}&action=archive`, { method: 'POST' });
       toast('Tarjeta archivada');
     } catch (err) {
       toast('Error al archivar: ' + err.message, 4500);
@@ -582,7 +582,7 @@ async function handleCardAction(act, id) {
     return loadCards();
   }
   if (act === 'pause' || act === 'activate') {
-    await api(`/api/admin/cards/${id}`, {
+    await api(`/api/admin/cards?id=${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: act === 'pause' ? 'pausada' : 'activa' }),
     });
@@ -1027,7 +1027,7 @@ $('cardForm').addEventListener('submit', async (e) => {
         payload.quota_adjust = { views: adjustViews, note: $('f_adjustNote').value };
       }
       setProgress(92, 'Guardando cambios…');
-      await api(`/api/admin/cards/${editing}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      await api(`/api/admin/cards?id=${editing}`, { method: 'PATCH', body: JSON.stringify(payload) });
     } else {
       setProgress(92, 'Creando la tarjeta…');
       await api('/api/admin/cards', { method: 'POST', body: JSON.stringify(payload) });
@@ -1089,7 +1089,7 @@ $('applyRechargeBtn').addEventListener('click', async () => {
     return;
   }
   try {
-    const data = await api(`/api/admin/cards/${state.rechargeId}/recharge`, {
+    const data = await api(`/api/admin/cards?id=${state.rechargeId}&action=recharge`, {
       method: 'POST',
       body: JSON.stringify({
         packLabel,
