@@ -46,6 +46,16 @@ module.exports = async function handler(req, res) {
       req.query = { ...(req.query || {}), id: seg[1] };
       return await card(req, res);
     }
+    if (seg.length === 3 && seg[0] === 'cards' && seg[2] === 'delete') {
+      req.query = { ...(req.query || {}), id: seg[1] };
+      req.forceDelete = true;
+      return await card(req, res);
+    }
+    if (seg.length === 3 && seg[0] === 'cards' && seg[2] === 'archive') {
+      req.query = { ...(req.query || {}), id: seg[1] };
+      req.forceArchive = true;
+      return await card(req, res);
+    }
     if (seg.length === 3 && seg[0] === 'cards' && seg[2] === 'recharge') {
       req.query = { ...(req.query || {}), id: seg[1] };
       return await recharge(req, res);

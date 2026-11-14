@@ -410,7 +410,7 @@ $('deleteCardBtn').addEventListener('click', async () => {
   if (!id) return;
   if (!window.confirm('¿Eliminar esta tarjeta PARA SIEMPRE? Se borran también sus archivos, su historial de vistas y las recargas. No se puede deshacer.')) return;
   try {
-    await api(`/api/admin/cards/${id}`, { method: 'DELETE' });
+    await api(`/api/admin/cards/${id}/delete`, { method: 'POST' });
     toast('Tarjeta eliminada');
     closeModal('cardModal');
     await loadCards();
@@ -573,8 +573,12 @@ async function handleCardAction(act, id) {
   if (act === 'edit') return openCardForm(card);
   if (act === 'archive') {
     if (!window.confirm(`¿Archivar «${card.title}»? Dejará de mostrarse en la lista principal y la experiencia quedará inactiva.`)) return;
-    await api(`/api/admin/cards/${id}`, { method: 'DELETE' });
-    toast('Tarjeta archivada');
+    try {
+      await api(`/api/admin/cards/${id}/archive`, { method: 'POST' });
+      toast('Tarjeta archivada');
+    } catch (err) {
+      toast('Error al archivar: ' + err.message, 4500);
+    }
     return loadCards();
   }
   if (act === 'pause' || act === 'activate') {
